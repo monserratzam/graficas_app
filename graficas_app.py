@@ -4,7 +4,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
 
-st.set_page_config(page_title="Dashboard Mantenimiento Integral", layout="wide")
+# Configuración de página
+st.set_page_config(page_title="Dashboard Mantenimiento UV", layout="wide")
 
 st.title("📊 Dashboard de Gestión, Calidad y Rendimiento de Mantenimiento")
 st.markdown("---")
@@ -16,29 +17,49 @@ if archivo:
     hoja_seleccionada = st.selectbox("1. Selecciona la hoja de datos", xls.sheet_names)
     df = pd.read_excel(archivo, sheet_name=hoja_seleccionada)
 
-    # --- CONFIGURACIÓN DE NOMBRES EXACTOS ---
+    # --- VARIABLES SEGÚN TU ESTRUCTURA ---
     COL_MANTO = "Tipo de mantención"
     COL_TECNICO = "Nombre Técnico"
     COL_OT = "N°OT"
     COL_HH = "Horas Hombres"
     COL_TIEMPO = "Tiempo mantención"
     COL_EQUIPO = "Equipo"
+    # Nuevas variables para filtros temporales
+    COL_MES = "Mes término"
+    COL_ANIO = "Año término"
 
-    requeridos = [COL_MANTO, COL_TECNICO, COL_OT, COL_TIEMPO, COL_HH, COL_EQUIPO]
+    requeridos = [COL_MANTO, COL_TECNICO, COL_OT, COL_TIEMPO, COL_HH, COL_EQUIPO, COL_MES, COL_ANIO]
     
     if all(col in df.columns for col in requeridos):
         
-        # --- FILTROS GLOBALES ---
-        st.sidebar.header("⚙️ Filtros Globales")
+        # --- FILTROS GLOBALES (SIDEBAR) ---
+        st.sidebar.header("⚙️ Filtros de Búsqueda")
+        
+        # Filtro de Año
+        anios_disponibles = sorted(df[COL_ANIO].dropna().unique().tolist(), reverse=True)
+        anio_sel = st.sidebar.multiselect("Año de Término", anios_disponibles, default=anios_disponibles)
+        
+        # Filtro de Mes
+        meses_disponibles = sorted(df[COL_MES].dropna().unique().tolist())
+        mes_sel = st.sidebar.multiselect("Mes de Término", meses_disponibles, default=meses_disponibles)
+        
+        # Filtros de Categoría
         manto_sel = st.sidebar.multiselect("Tipo de Mantención", sorted(df[COL_MANTO].unique()), default=df[COL_MANTO].unique())
         tecnico_sel = st.sidebar.multiselect("Técnicos", sorted(df[COL_TECNICO].unique()), default=df[COL_TECNICO].unique())
 
-        # Limpieza y filtrado
-        df_f = df[(df[COL_MANTO].isin(manto_sel)) & (df[COL_TECNICO].isin(tecnico_sel))].copy()
+        # --- APLICACIÓN DE FILTROS ---
+        df_f = df[
+            (df[COL_ANIO].isin(anio_sel)) & 
+            (df[COL_MES].isin(mes_sel)) & 
+            (df[COL_MANTO].isin(manto_sel)) & 
+            (df[COL_TECNICO].isin(tecnico_sel))
+        ].copy()
+
+        # Limpieza de datos numéricos
         for c in [COL_HH, COL_TIEMPO]:
             df_f[c] = pd.to_numeric(df_f[c], errors='coerce').fillna(0)
 
-        # --- CREACIÓN DE PESTAÑAS (Organización Total) ---
+        # --- PESTAÑAS ---
         t1, t2, t3, t4, t5, t6, t7, t8, t9 = st.tabs([
             "👥 Rendimiento Técnico", 
             "⏱️ Análisis de Tiempos",
@@ -46,56 +67,49 @@ if archivo:
             "📍 Dispersión (Linealidad)",
             "⚙️ Análisis de Equipos",
             "🍰 Distribución OT",
-            "📉 Histogramas",
+            "📈 Histogramas",
             "🎯 Paretos (Calidad)",
+            "📋 Datos Crudos"
         ])
 
-        # --- TAB 1: RENDIMIENTO TÉCNICO (OT y HH) ---
+        # --- TAB 1: RENDIMIENTO TÉCNICO ---
         with t1:
             st.subheader("Productividad y Esfuerzo por Técnico")
-            # Cantidad OT
             res_ot = df_f.groupby(COL_TECNICO)[COL_OT].count().reset_index().sort_values(COL_OT, ascending=False)
             st.plotly_chart(px.bar(res_ot, x=COL_TECNICO, y=COL_OT, title="Total de OT por Técnico", text_auto=True), use_container_width=True)
             
-            # Suma HH
             res_hh_sum = df_f.groupby(COL_TECNICO)[COL_HH].sum().reset_index().sort_values(COL_HH, ascending=False)
             st.plotly_chart(px.bar(res_hh_sum, x=COL_TECNICO, y=COL_HH, title="Suma Total de Horas Hombre (HH)", text_auto='.2f', color_discrete_sequence=['#2ca02c']), use_container_width=True)
             
-            # Promedio HH (Recuperado)
             res_hh_avg = df_f.groupby(COL_TECNICO)[COL_HH].mean().reset_index().sort_values(COL_HH, ascending=False)
-            st.plotly_chart(px.bar(res_hh_avg, x=COL_TECNICO, y=COL_HH, title="Promedio de Horas Hombre (HH) por OT", text_auto='.2f', color_discrete_sequence=['#9467bd']), use_container_width=True)
-            
-            st.write("**Hoja de Verificación: Rendimiento HH**")
-            st.dataframe(res_hh_sum, hide_index=True, use_container_width=True)
+            st.plotly_chart(px.bar(res_hh_avg, x=COL_TECNICO, y=COL_HH, title="Promedio de HH por OT", text_auto='.2f', color_discrete_sequence=['#9467bd']), use_container_width=True)
 
-        # --- TAB 2: ANÁLISIS DE TIEMPOS (Suma y Promedios Recuperados) ---
+        # --- TAB 2: ANÁLISIS DE TIEMPOS ---
         with t2:
-            st.subheader("Análisis de Tiempos de Mantención por Técnico")
-            # Suma Tiempo Mto (Recuperado)
+            st.subheader("Tiempos de Ejecución")
             res_t_sum = df_f.groupby(COL_TECNICO)[COL_TIEMPO].sum().reset_index().sort_values(COL_TIEMPO, ascending=False)
-            st.plotly_chart(px.bar(res_t_sum, x=COL_TECNICO, y=COL_TIEMPO, title="Suma Total de Tiempo de Mantenimiento", text_auto='.2f', color_discrete_sequence=['#ff7f0e']), use_container_width=True)
+            st.plotly_chart(px.bar(res_t_sum, x=COL_TECNICO, y=COL_TIEMPO, title="Suma Total Tiempo Mantenimiento", text_auto='.2f', color_discrete_sequence=['#ff7f0e']), use_container_width=True)
             
-            # Promedio Tiempo Mto (Recuperado)
             res_t_avg = df_f.groupby(COL_TECNICO)[COL_TIEMPO].mean().reset_index().sort_values(COL_TIEMPO, ascending=False)
-            st.plotly_chart(px.bar(res_t_avg, x=COL_TECNICO, y=COL_TIEMPO, title="Promedio de Tiempo de Mantenimiento por OT", text_auto='.2f', color_discrete_sequence=['#d62728']), use_container_width=True)
-            
-            st.write("**Hoja de Verificación: Tiempos por Técnico**")
-            st.dataframe(res_t_sum, hide_index=True, use_container_width=True)
+            st.plotly_chart(px.bar(res_t_avg, x=COL_TECNICO, y=COL_TIEMPO, title="Promedio Tiempo Mantenimiento por OT", text_auto='.2f', color_discrete_sequence=['#d62728']), use_container_width=True)
 
         # --- TAB 3: CONSOLIDADO DE CALIDAD ---
         with t3:
             st.subheader("Hoja de Verificación: Desempeño por OT")
-            consolidado = df_f.groupby(COL_TECNICO).agg({COL_OT: 'count', COL_TIEMPO: 'sum'}).reset_index()
-            consolidado['Promedio Tiempo por OT'] = consolidado[COL_TIEMPO] / consolidado[COL_OT]
-            consolidado.columns = ["Nombre del Técnico", "Suma de OT", "Suma Tiempo de Mantenimiento", "Promedio de Tiempo Mto por OT"]
-            st.dataframe(consolidado.sort_values("Promedio de Tiempo Mto por OT", ascending=False).style.format({
-                "Suma Tiempo de Mantenimiento": "{:.2f}",
-                "Promedio de Tiempo Mto por OT": "{:.2f}"
-            }), use_container_width=True, hide_index=True)
+            if not df_f.empty:
+                consolidado = df_f.groupby(COL_TECNICO).agg({COL_OT: 'count', COL_TIEMPO: 'sum'}).reset_index()
+                consolidado['Promedio'] = consolidado[COL_TIEMPO] / consolidado[COL_OT]
+                consolidado.columns = ["Técnico", "Suma de OT", "Suma Tiempo Mto", "Promedio Tiempo Mto por OT"]
+                st.dataframe(consolidado.sort_values("Promedio Tiempo Mto por OT", ascending=False).style.format({
+                    "Suma Tiempo Mto": "{:.2f}",
+                    "Promedio Tiempo Mto por OT": "{:.2f}"
+                }), use_container_width=True, hide_index=True)
+            else:
+                st.warning("No hay datos para los filtros seleccionados.")
 
-        # --- TAB 4: ANÁLISIS DE DISPERSIÓN ---
+        # --- TAB 4: DISPERSIÓN (Linealidad) ---
         with t4:
-            st.subheader("Análisis de Linealidad: Cantidad de OT vs Esfuerzo Total (HH)")
+            st.subheader("Linealidad: Cantidad de OT vs Esfuerzo Total (HH)")
             disp_data = df_f.groupby(COL_TECNICO).agg({COL_OT: 'count', COL_HH: 'sum'}).reset_index()
             disp_data.columns = ["Técnico", "x", "y"]
 
@@ -105,12 +119,15 @@ if archivo:
                 linea_y = m * linea_x + b
                 
                 fig_disp = go.Figure()
-                fig_disp.add_trace(go.Scatter(x=disp_data["x"], y=disp_data["y"], mode='markers+text', text=disp_data["Técnico"], textposition="top center", marker=dict(size=12, color='#636EFA', opacity=0.8), name="Técnicos"))
-                fig_disp.add_trace(go.Scatter(x=linea_x, y=linea_y, mode='lines', line=dict(color='red', dash='dash'), name="Tendencia Lineal"))
-                fig_disp.update_layout(title="Relación Lineal: OT vs. HH", xaxis_title="Número de OT", yaxis_title="Horas Hombre (HH)")
+                fig_disp.add_trace(go.Scatter(x=disp_data["x"], y=disp_data["y"], mode='markers+text', 
+                                             text=disp_data["Técnico"], textposition="top center", 
+                                             marker=dict(size=12, color='#636EFA'), name="Técnicos"))
+                fig_disp.add_trace(go.Scatter(x=linea_x, y=linea_y, mode='lines', 
+                                             line=dict(color='red', dash='dash'), name="Tendencia Lineal"))
+                fig_disp.update_layout(xaxis_title="Número de OT", yaxis_title="Horas Hombre (HH)")
                 st.plotly_chart(fig_disp, use_container_width=True)
             else:
-                st.warning("Se necesitan al menos dos técnicos para calcular la tendencia.")
+                st.info("Se necesitan al menos 2 técnicos filtrados para mostrar la línea de tendencia.")
 
         # --- TAB 5: ANÁLISIS DE EQUIPOS ---
         with t5:
@@ -128,36 +145,43 @@ if archivo:
 
         # --- TAB 7: HISTOGRAMAS ---
         with t7:
-            st.subheader("Distribución de Frecuencia de Tiempos")
+            st.subheader("Histograma: Frecuencia de Tiempos")
             fig_h = px.histogram(df_f, x=COL_TIEMPO, nbins=20, text_auto=True)
             fig_h.update_layout(bargap=0.1, xaxis_title="Rango de Tiempo", yaxis_title="Cantidad de OTs")
             st.plotly_chart(fig_h, use_container_width=True)
 
-        # --- TAB 8: PARETOS (HH y TIEMPO PROMEDIO) ---
+        # --- TAB 8: PARETOS ---
         with t8:
             # Pareto HH
             st.subheader("Pareto: Tipo Mantención vs HH")
             p_hh = df_f.groupby(COL_MANTO)[COL_HH].sum().sort_values(ascending=False).reset_index()
-            p_hh['% Acumulado'] = (100 * p_hh[COL_HH].cumsum() / p_hh[COL_HH].sum())
-            fig_p1 = go.Figure()
-            fig_p1.add_trace(go.Bar(x=p_hh[COL_MANTO], y=p_hh[COL_HH], name="Suma HH"))
-            fig_p1.add_trace(go.Scatter(x=p_hh[COL_MANTO], y=p_hh['% Acumulado'], name="%", yaxis="y2", line=dict(color="red", width=3)))
-            fig_p1.update_layout(yaxis2=dict(overlaying="y", side="right", range=[0, 105]))
-            st.plotly_chart(fig_p1, use_container_width=True)
+            if not p_hh.empty:
+                p_hh['% Acumulado'] = (100 * p_hh[COL_HH].cumsum() / p_hh[COL_HH].sum())
+                fig_p1 = go.Figure()
+                fig_p1.add_trace(go.Bar(x=p_hh[COL_MANTO], y=p_hh[COL_HH], name="Suma HH"))
+                fig_p1.add_trace(go.Scatter(x=p_hh[COL_MANTO], y=p_hh['% Acumulado'], name="%", yaxis="y2", line=dict(color="red", width=3)))
+                fig_p1.update_layout(yaxis2=dict(overlaying="y", side="right", range=[0, 105]))
+                st.plotly_chart(fig_p1, use_container_width=True)
             
             st.divider()
 
             # Pareto Tiempo Promedio
             st.subheader("Pareto: Tipo Mantención vs Tiempo Promedio")
             p_tp = df_f.groupby(COL_MANTO)[COL_TIEMPO].mean().sort_values(ascending=False).reset_index()
-            p_tp['% Acumulado'] = (100 * p_tp[COL_TIEMPO].cumsum() / p_tp[COL_TIEMPO].sum())
-            fig_p2 = go.Figure()
-            fig_p2.add_trace(go.Bar(x=p_tp[COL_MANTO], y=p_tp[COL_TIEMPO], name="Tiempo Promedio", marker_color="orange"))
-            fig_p2.add_trace(go.Scatter(x=p_tp[COL_MANTO], y=p_tp['% Acumulado'], name="%", yaxis="y2", line=dict(color="red", width=3)))
-            fig_p2.update_layout(yaxis2=dict(overlaying="y", side="right", range=[0, 105]))
-            st.plotly_chart(fig_p2, use_container_width=True)
+            if not p_tp.empty:
+                p_tp['% Acumulado'] = (100 * p_tp[COL_TIEMPO].cumsum() / p_tp[COL_TIEMPO].sum())
+                fig_p2 = go.Figure()
+                fig_p2.add_trace(go.Bar(x=p_tp[COL_MANTO], y=p_tp[COL_TIEMPO], name="Tiempo Promedio", marker_color="orange"))
+                fig_p2.add_trace(go.Scatter(x=p_tp[COL_MANTO], y=p_tp['% Acumulado'], name="%", yaxis="y2", line=dict(color="red", width=3)))
+                fig_p2.update_layout(yaxis2=dict(overlaying="y", side="right", range=[0, 105]))
+                st.plotly_chart(fig_p2, use_container_width=True)
+
+        # --- TAB 9: DATOS CRUDOS ---
+        with t9:
+            st.subheader("Vista General de Datos Filtrados")
+            st.dataframe(df_f, use_container_width=True)
 
     else:
-        st.error(f"Faltan columnas requeridas en el archivo.")
+        st.error(f"Error: No se encontraron todas las columnas necesarias. Requeridas: {requeridos}")
 else:
     st.info("Sube tu archivo Excel para iniciar el Dashboard.")
