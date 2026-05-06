@@ -7,78 +7,75 @@ st.set_page_config(page_title="Dashboard Mantenimiento", layout="wide")
 st.title("📊 Dashboard de Gestión de Mantenimiento")
 
 # --- CARGA DE ARCHIVO ---
-archivo = st.file_uploader("Sube tu archivo Excel homologado", type=["xlsx"])
+archivo = st.file_uploader("Sube tu archivo Excel", type=["xlsx"])
 
 if archivo:
-    # 1. Cargar el objeto Excel para ver las hojas disponibles
+    # 1. Obtener nombres de las hojas
     xls = pd.ExcelFile(archivo)
-    hojas = xls.sheet_names
+    hoja_seleccionada = st.selectbox("1. Selecciona la hoja de datos", xls.sheet_names)
     
-    # Selector de hoja para evitar buscar en la hoja equivocada
-    hoja_seleccionada = st.selectbox("Selecciona la hoja donde están los datos", hojas)
-    
-    # 2. Leer la hoja seleccionada
+    # 2. Leer la hoja elegida
     df = pd.read_excel(archivo, sheet_name=hoja_seleccionada)
+
+    # --- SECCIÓN DE PREVISUALIZACIÓN ---
+    st.header("🔍 Previsualización de Datos")
+    st.write(f"Hoja actual: **{hoja_seleccionada}** | Columnas detectadas: **{len(df.columns)}**")
+    st.dataframe(df.head(10)) 
     
-    # 3. LIMPIEZA DE COLUMNAS (Crucial para evitar KeyError)
-    # Quitamos espacios al inicio/final y saltos de línea internos
-    df.columns = [str(col).strip().replace('\n', ' ') for col in df.columns]
+    with st.expander("Ver nombres exactos de las columnas en esta hoja"):
+        st.write(list(df.columns))
+    st.divider()
 
-    # --- BUSCADOR INTELIGENTE POR NOMBRE ---
-    # Esta función busca la columna que contenga la palabra clave, ignorando mayúsculas/minúsculas
-    def encontrar_columna(keywords):
-        for col in df.columns:
-            if any(k.lower() in col.lower() for k in keywords):
-                return col
-        return None
+    # --- CONFIGURACIÓN DE NOMBRES ESPECÍFICOS ---
+    # Definimos los nombres exactos que debe buscar el código
+    COL_MANTO = "Tipo de mantención"
+    COL_TECNICO = "Nombre Técnico"
+    COL_OT = "N°OT"
+    COL_HH = "Horas Hombres"
+    COL_TIEMPO = "Tiempo mantención"
+    COL_EQUIPO = "Equipo"
+    COL_MES = "mes recepción"
+    COL_AÑO = "Año recepción"
 
-    # Mapeo automático basado en tus nombres reales
-    c_manto   = encontrar_columna(['Tipo de mantención', 'Tipo de mantencion', 'mantenimiento'])
-    c_tecnico = encontrar_columna(['Nombre Técnico', 'Nombre Tecnico', 'Técnico'])
-    c_ot      = encontrar_columna(['N°OT', 'N° OT', 'OT'])
-    c_hh      = encontrar_columna(['Horas Hombres', 'HH'])
-    c_tiempo  = encontrar_columna(['Tiempo mantención', 'Tiempo mantencion', 'tiempo total'])
-    c_mes     = encontrar_columna(['mes recepción', 'mes recepcion', 'mes'])
-    c_año     = encontrar_columna(['Año recepción', 'Año recepcion', 'año'])
-    c_equipo  = encontrar_columna(['Equipo'])
-
-    # --- VALIDACIÓN DE SEGURIDAD ---
-    columnas_criticas = {"Tipo Mantención": c_manto, "Técnico": c_tecnico, "N° OT": c_ot}
-    faltantes = [k for k, v in columnas_criticas.items() if v is None]
+    # --- VALIDACIÓN DE EXISTENCIA ---
+    nombres_requeridos = [COL_MANTO, COL_TECNICO, COL_OT, COL_HH, COL_TIEMPO]
+    faltantes = [col for col in nombres_requeridos if col not in df.columns]
 
     if faltantes:
-        st.error(f"❌ No se encontraron las columnas: {', '.join(faltantes)}")
-        with st.expander("Ver todas las columnas detectadas en esta hoja"):
-            st.write(list(df.columns))
+        st.error(f"❌ No se encontraron las columnas exactas: {faltantes}")
+        st.info("Asegúrate de que la hoja seleccionada sea la correcta y que los nombres coincidan letra por letra.")
     else:
         # --- FILTROS (SIDEBAR) ---
         st.sidebar.header("⚙️ Filtros")
         
-        manto_opciones = sorted(df[c_manto].dropna().unique())
-        manto_sel = st.sidebar.multiselect(f"Filtrar {c_manto}", manto_opciones, default=manto_opciones)
+        # Filtros con nombres específicos
+        manto_opciones = sorted(df[COL_MANTO].dropna().unique())
+        manto_sel = st.sidebar.multiselect(f"Filtrar {COL_MANTO}", manto_opciones, default=manto_opciones)
         
-        tecnico_opciones = sorted(df[c_tecnico].dropna().unique())
-        tecnico_sel = st.sidebar.multiselect(f"Filtrar {c_tecnico}", tecnico_opciones, default=tecnico_opciones)
+        tecnico_opciones = sorted(df[COL_TECNICO].dropna().unique())
+        tecnico_sel = st.sidebar.multiselect(f"Filtrar {COL_TECNICO}", tecnico_opciones, default=tecnico_opciones)
 
         # Aplicar Filtros
         df_filtrado = df[
-            (df[c_manto].isin(manto_sel)) &
-            (df[c_tecnico].isin(tecnico_sel))
-        ]
+            (df[COL_MANTO].isin(manto_sel)) &
+            (df[COL_TECNICO].isin(tecnico_sel))
+        ].copy()
 
-        # Conversión numérica de HH y Tiempos
-        for c in [c_hh, c_tiempo]:
-            if c:
-                df_filtrado[c] = pd.to_numeric(df_filtrado[c], errors='coerce').fillna(0)
+        # Conversión numérica de columnas de cálculo
+        for c in [COL_HH, COL_TIEMPO]:
+            df_filtrado[c] = pd.to_numeric(df_filtrado[c], errors='coerce').fillna(0)
 
         # --- FUNCIÓN DE GRÁFICOS ---
         def generar_seccion(titulo, g_col, a_col, func, top=10):
-            if not df_filtrado.empty and g_col and a_col:
+            if not df_filtrado.empty:
                 st.subheader(titulo)
+                # Agrupación
                 resumen = df_filtrado.groupby(g_col)[a_col].agg(func).reset_index()
                 resumen.columns = [g_col, 'Valor']
                 resumen = resumen.sort_values(by='Valor', ascending=False)
-                if top: resumen = resumen.head(top)
+                
+                if top:
+                    resumen = resumen.head(top)
                 
                 c1, c2 = st.columns([2, 1])
                 with c1:
@@ -87,21 +84,21 @@ if archivo:
                     fig.update_layout(xaxis={'categoryorder':'total descending'}, xaxis_title=None)
                     st.plotly_chart(fig, use_container_width=True)
                 with c2:
-                    st.info("Hoja de Verificación")
+                    st.write("**Datos del reporte**")
                     st.dataframe(resumen, hide_index=True, use_container_width=True)
                 st.divider()
 
-        # --- EJECUCIÓN DE REPORTES ---
+        # --- RENDERIZADO DE REPORTES ---
         if not df_filtrado.empty:
-            generar_seccion("Top 10: Suma de N° OT por Técnico", c_tecnico, c_ot, "count")
-            generar_seccion("Top 10: Suma de Horas Hombres por Técnico", c_tecnico, c_hh, "sum")
-            generar_seccion("Top 10: Tiempo Mantención Total por Técnico", c_tecnico, c_tiempo, "sum")
-            generar_seccion("Top 10: Cantidad de OTs por Equipo/Técnico", c_tecnico, c_ot, "count")
-            generar_seccion("Top 10: Promedio Tiempo Mantención por Técnico", c_tecnico, c_tiempo, "mean")
-            if c_equipo:
-                generar_seccion("Distribución de OT por Tipo de Equipo", c_equipo, c_ot, "count", top=None)
+            generar_seccion("Top 10: Cantidad de OT por Técnico", COL_TECNICO, COL_OT, "count")
+            generar_seccion("Top 10: Suma de Horas Hombres por Técnico", COL_TECNICO, COL_HH, "sum")
+            generar_seccion("Top 10: Tiempo Mantención Total por Técnico", COL_TECNICO, COL_TIEMPO, "sum")
+            generar_seccion("Top 10: Promedio Tiempo Mantención por Técnico", COL_TECNICO, COL_TIEMPO, "mean")
+            
+            if COL_EQUIPO in df.columns:
+                generar_seccion("Distribución de OT por Tipo de Equipo", COL_EQUIPO, COL_OT, "count", top=None)
         else:
-            st.warning("No hay datos para los filtros seleccionados.")
+            st.warning("No hay datos que coincidan con los filtros seleccionados.")
 
 else:
-    st.info("Sube tu archivo Excel para comenzar el análisis.")
+    st.info("Sube tu archivo Excel para comenzar.")
