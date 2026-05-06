@@ -24,7 +24,6 @@ if archivo:
     COL_HH = "Horas Hombres"
     COL_TIEMPO = "Tiempo mantención"
     COL_EQUIPO = "Equipo"
-    # Nuevas variables para filtros temporales
     COL_MES = "Mes término"
     COL_ANIO = "Año término"
 
@@ -35,19 +34,23 @@ if archivo:
         # --- FILTROS GLOBALES (SIDEBAR) ---
         st.sidebar.header("⚙️ Filtros de Búsqueda")
         
-        # Filtro de Año
-        anios_disponibles = sorted(df[COL_ANIO].dropna().unique().tolist(), reverse=True)
+        # Corrección del error: Convertir a numérico y eliminar NaNs antes de ordenar
+        anios_raw = pd.to_numeric(df[COL_ANIO], errors='coerce').dropna().unique()
+        anios_disponibles = sorted([int(a) for a in anios_raw], reverse=True)
         anio_sel = st.sidebar.multiselect("Año de Término", anios_disponibles, default=anios_disponibles)
         
-        # Filtro de Mes
-        meses_disponibles = sorted(df[COL_MES].dropna().unique().tolist())
+        # Aplicar lo mismo para el mes por si acaso hay datos mixtos
+        meses_disponibles = sorted(df[COL_MES].dropna().astype(str).unique().tolist())
         mes_sel = st.sidebar.multiselect("Mes de Término", meses_disponibles, default=meses_disponibles)
         
         # Filtros de Categoría
-        manto_sel = st.sidebar.multiselect("Tipo de Mantención", sorted(df[COL_MANTO].unique()), default=df[COL_MANTO].unique())
-        tecnico_sel = st.sidebar.multiselect("Técnicos", sorted(df[COL_TECNICO].unique()), default=df[COL_TECNICO].unique())
+        manto_sel = st.sidebar.multiselect("Tipo de Mantención", sorted(df[COL_MANTO].dropna().unique()), default=df[COL_MANTO].unique())
+        tecnico_sel = st.sidebar.multiselect("Técnicos", sorted(df[COL_TECNICO].dropna().unique()), default=df[COL_TECNICO].unique())
 
         # --- APLICACIÓN DE FILTROS ---
+        # Aseguramos que la comparación de año sea numérica
+        df[COL_ANIO] = pd.to_numeric(df[COL_ANIO], errors='coerce')
+        
         df_f = df[
             (df[COL_ANIO].isin(anio_sel)) & 
             (df[COL_MES].isin(mes_sel)) & 
@@ -55,11 +58,11 @@ if archivo:
             (df[COL_TECNICO].isin(tecnico_sel))
         ].copy()
 
-        # Limpieza de datos numéricos
+        # Limpieza de datos numéricos para cálculos
         for c in [COL_HH, COL_TIEMPO]:
             df_f[c] = pd.to_numeric(df_f[c], errors='coerce').fillna(0)
 
-        # --- PESTAÑAS ---
+        # --- PESTAÑAS (9 TABS) ---
         t1, t2, t3, t4, t5, t6, t7, t8, t9 = st.tabs([
             "👥 Rendimiento Técnico", 
             "⏱️ Análisis de Tiempos",
@@ -104,10 +107,8 @@ if archivo:
                     "Suma Tiempo Mto": "{:.2f}",
                     "Promedio Tiempo Mto por OT": "{:.2f}"
                 }), use_container_width=True, hide_index=True)
-            else:
-                st.warning("No hay datos para los filtros seleccionados.")
 
-        # --- TAB 4: DISPERSIÓN (Linealidad) ---
+        # --- TAB 4: DISPERSIÓN ---
         with t4:
             st.subheader("Linealidad: Cantidad de OT vs Esfuerzo Total (HH)")
             disp_data = df_f.groupby(COL_TECNICO).agg({COL_OT: 'count', COL_HH: 'sum'}).reset_index()
@@ -126,8 +127,6 @@ if archivo:
                                              line=dict(color='red', dash='dash'), name="Tendencia Lineal"))
                 fig_disp.update_layout(xaxis_title="Número de OT", yaxis_title="Horas Hombre (HH)")
                 st.plotly_chart(fig_disp, use_container_width=True)
-            else:
-                st.info("Se necesitan al menos 2 técnicos filtrados para mostrar la línea de tendencia.")
 
         # --- TAB 5: ANÁLISIS DE EQUIPOS ---
         with t5:
@@ -152,29 +151,14 @@ if archivo:
 
         # --- TAB 8: PARETOS ---
         with t8:
-            # Pareto HH
-            st.subheader("Pareto: Tipo Mantención vs HH")
             p_hh = df_f.groupby(COL_MANTO)[COL_HH].sum().sort_values(ascending=False).reset_index()
             if not p_hh.empty:
                 p_hh['% Acumulado'] = (100 * p_hh[COL_HH].cumsum() / p_hh[COL_HH].sum())
                 fig_p1 = go.Figure()
                 fig_p1.add_trace(go.Bar(x=p_hh[COL_MANTO], y=p_hh[COL_HH], name="Suma HH"))
                 fig_p1.add_trace(go.Scatter(x=p_hh[COL_MANTO], y=p_hh['% Acumulado'], name="%", yaxis="y2", line=dict(color="red", width=3)))
-                fig_p1.update_layout(yaxis2=dict(overlaying="y", side="right", range=[0, 105]))
+                fig_p1.update_layout(title="Pareto: Tipo Mantención vs HH", yaxis2=dict(overlaying="y", side="right", range=[0, 105]))
                 st.plotly_chart(fig_p1, use_container_width=True)
-            
-            st.divider()
-
-            # Pareto Tiempo Promedio
-            st.subheader("Pareto: Tipo Mantención vs Tiempo Promedio")
-            p_tp = df_f.groupby(COL_MANTO)[COL_TIEMPO].mean().sort_values(ascending=False).reset_index()
-            if not p_tp.empty:
-                p_tp['% Acumulado'] = (100 * p_tp[COL_TIEMPO].cumsum() / p_tp[COL_TIEMPO].sum())
-                fig_p2 = go.Figure()
-                fig_p2.add_trace(go.Bar(x=p_tp[COL_MANTO], y=p_tp[COL_TIEMPO], name="Tiempo Promedio", marker_color="orange"))
-                fig_p2.add_trace(go.Scatter(x=p_tp[COL_MANTO], y=p_tp['% Acumulado'], name="%", yaxis="y2", line=dict(color="red", width=3)))
-                fig_p2.update_layout(yaxis2=dict(overlaying="y", side="right", range=[0, 105]))
-                st.plotly_chart(fig_p2, use_container_width=True)
 
         # --- TAB 9: DATOS CRUDOS ---
         with t9:
@@ -182,6 +166,6 @@ if archivo:
             st.dataframe(df_f, use_container_width=True)
 
     else:
-        st.error(f"Error: No se encontraron todas las columnas necesarias. Requeridas: {requeridos}")
+        st.error(f"Error: Faltan columnas necesarias.")
 else:
     st.info("Sube tu archivo Excel para iniciar el Dashboard.")
