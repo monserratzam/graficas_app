@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 
 st.set_page_config(page_title="Dashboard Mantenimiento Pro", layout="wide")
 
-st.title("📊 Dashboard de Gestión y Calidad de Mantenimiento")
+st.title("📊 Gestión de Mantenimiento y Control de Calidad")
 st.markdown("---")
 
 archivo = st.file_uploader("Sube tu archivo Excel", type=["xlsx"])
@@ -15,7 +15,7 @@ if archivo:
     hoja_seleccionada = st.selectbox("1. Selecciona la hoja de datos", xls.sheet_names)
     df = pd.read_excel(archivo, sheet_name=hoja_seleccionada)
 
-    # --- NOMBRES ESPECÍFICOS ---
+    # --- CONFIGURACIÓN DE NOMBRES ---
     COL_MANTO = "Tipo de mantención"
     COL_TECNICO = "Nombre Técnico"
     COL_OT = "N°OT"
@@ -23,71 +23,114 @@ if archivo:
     COL_TIEMPO = "Tiempo mantención"
     COL_EQUIPO = "Equipo"
 
-    # Verificación rápida
-    requeridos = [COL_MANTO, COL_TECNICO, COL_OT, COL_TIEMPO]
+    # Verificar columnas básicas
+    requeridos = [COL_MANTO, COL_TECNICO, COL_OT, COL_TIEMPO, COL_HH]
     if all(col in df.columns for col in requeridos):
         
-        # --- FILTROS ---
-        st.sidebar.header("⚙️ Filtros")
+        # --- FILTROS EN SIDEBAR ---
+        st.sidebar.header("⚙️ Filtros Globales")
         manto_sel = st.sidebar.multiselect("Tipo de Mantención", sorted(df[COL_MANTO].unique()), default=df[COL_MANTO].unique())
         tecnico_sel = st.sidebar.multiselect("Técnicos", sorted(df[COL_TECNICO].unique()), default=df[COL_TECNICO].unique())
 
-        df_filtrado = df[(df[COL_MANTO].isin(manto_sel)) & (df[COL_TECNICO].isin(tecnico_sel))].copy()
-        df_filtrado[COL_TIEMPO] = pd.to_numeric(df_filtrado[COL_TIEMPO], errors='coerce').fillna(0)
-        df_filtrado[COL_HH] = pd.to_numeric(df_filtrado[COL_HH], errors='coerce').fillna(0)
+        # Aplicar filtros y limpiar datos
+        df_f = df[(df[COL_MANTO].isin(manto_sel)) & (df[COL_TECNICO].isin(tecnico_sel))].copy()
+        for c in [COL_HH, COL_TIEMPO]:
+            df_f[c] = pd.to_numeric(df_f[c], errors='coerce').fillna(0)
 
-        # --- 1. GRÁFICO DE TORTA (Distribución de OT) ---
-        st.subheader(f"Distribución de OT por {COL_MANTO}")
-        resumen_torta = df_filtrado.groupby(COL_MANTO)[COL_OT].count().reset_index()
-        resumen_torta.columns = [COL_MANTO, 'Cantidad']
-        resumen_torta['Porcentaje'] = (resumen_torta['Cantidad'] / resumen_torta['Cantidad'].sum() * 100).map("{:.1f}%".format)
+        # --- CREACIÓN DE PESTAÑAS ---
+        t1, t2, t3, t4, t5, t6, t7 = st.tabs([
+            "📈 Rendimiento Técnico", 
+            "⏱️ Análisis de Tiempos", 
+            "🍰 Distribución OT",
+            "📊 Histograma Tiempos",
+            "🎯 Pareto (Calidad)",
+            "⚙️ Equipos",
+            "📋 Datos Filtrados"
+        ])
 
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            fig_pie = px.pie(resumen_torta, values='Cantidad', names=COL_MANTO, hole=0.4)
-            fig_pie.update_traces(textinfo='value') # Solo valores en el gráfico
-            st.plotly_chart(fig_pie, use_container_width=True)
-        with col2:
-            st.write("**Hoja de Verificación**")
-            st.dataframe(resumen_torta, hide_index=True, use_container_width=True)
-        st.divider()
+        # --- TABA 1: RENDIMIENTO TÉCNICO (Gráficos originales) ---
+        with t1:
+            st.subheader("Productividad por Técnico")
+            # Cantidad de OT
+            res_ot = df_f.groupby(COL_TECNICO)[COL_OT].count().reset_index().sort_values(COL_OT, ascending=False)
+            st.plotly_chart(px.bar(res_ot.head(10), x=COL_TECNICO, y=COL_OT, title="Top 10: Cantidad de OT", text_auto=True), use_container_width=True)
+            st.write("**Hoja de Verificación: Cantidad OT**")
+            st.dataframe(res_ot, hide_index=True, use_container_width=True)
+            
+            st.divider()
+            
+            # Suma de HH
+            res_hh = df_f.groupby(COL_TECNICO)[COL_HH].sum().reset_index().sort_values(COL_HH, ascending=False)
+            st.plotly_chart(px.bar(res_hh.head(10), x=COL_TECNICO, y=COL_HH, title="Top 10: Total Horas Hombres", text_auto='.2f'), use_container_width=True)
+            st.write("**Hoja de Verificación: Horas Hombres**")
+            st.dataframe(res_hh, hide_index=True, use_container_width=True)
 
-        # --- 2. HISTOGRAMA (Distribución de Tiempos) ---
-        st.subheader("Análisis de Tiempos: Histograma de Frecuencias")
-        fig_hist = px.histogram(df_filtrado, x=COL_TIEMPO, nbins=20, 
-                               title="Frecuencia de Duración de Mantenimientos",
-                               color_discrete_sequence=['#636EFA'], marginal="box")
-        fig_hist.update_layout(xaxis_title="Tiempo de Mantención", yaxis_title="Frecuencia (Cantidad de OTs)")
-        st.plotly_chart(fig_hist, use_container_width=True)
-        st.info("💡 Este gráfico ayuda a identificar si existen 'outliers' o trabajos que toman mucho más tiempo del promedio.")
-        st.divider()
+        # --- TABA 2: ANÁLISIS DE TIEMPOS ---
+        with t2:
+            st.subheader("Análisis de Tiempos de Respuesta")
+            res_time = df_f.groupby(COL_TECNICO)[COL_TIEMPO].mean().reset_index().sort_values(COL_TIEMPO, ascending=False)
+            st.plotly_chart(px.bar(res_time.head(10), x=COL_TECNICO, y=COL_TIEMPO, title="Promedio Tiempo de Mantención", text_auto='.2f'), use_container_width=True)
+            st.write("**Hoja de Verificación: Promedios de Tiempo**")
+            st.dataframe(res_time, hide_index=True, use_container_width=True)
 
-        # --- 3. DIAGRAMA DE PARETO (Herramienta de Calidad sugerida) ---
-        st.subheader("Herramienta de Calidad: Diagrama de Pareto (Técnicos vs HH)")
-        pareto_data = df_filtrado.groupby(COL_TECNICO)[COL_HH].sum().sort_values(ascending=False).reset_index()
-        pareto_data['CumSum'] = pareto_data[COL_HH].cumsum()
-        pareto_data['CumPerc'] = 100 * pareto_data['CumSum'] / pareto_data[COL_HH].sum()
+        # --- TABA 3: GRÁFICO DE TORTA ---
+        with t3:
+            st.subheader(f"Distribución de OT por {COL_MANTO}")
+            res_pie = df_f.groupby(COL_MANTO)[COL_OT].count().reset_index()
+            res_pie.columns = [COL_MANTO, 'Cantidad']
+            res_pie['Porcentaje'] = (res_pie['Cantidad'] / res_pie['Cantidad'].sum() * 100).map("{:.1f}%".format)
+            
+            fig_p = px.pie(res_pie, values='Cantidad', names=COL_MANTO, hole=0.4)
+            fig_p.update_traces(textinfo='value') # Solo valores en el gráfico
+            st.plotly_chart(fig_p, use_container_width=True)
+            
+            st.write("**Hoja de Verificación (Incluye %)**")
+            st.dataframe(res_pie, hide_index=True, use_container_width=True)
 
-        fig_pareto = go.Figure()
-        fig_pareto.add_trace(go.Bar(x=pareto_data[COL_TECNICO], y=pareto_data[COL_HH], name="HH Acumuladas"))
-        fig_pareto.add_trace(go.Scatter(x=pareto_data[COL_TECNICO], y=pareto_data['CumPerc'], name="% Acumulado", yaxis="y2", line=dict(color="red", width=3)))
-        
-        fig_pareto.update_layout(
-            yaxis=dict(title="Horas Hombres"),
-            yaxis2=dict(title="Porcentaje Acumulado (%)", overlaying="y", side="right", range=[0, 105]),
-            legend=dict(x=0.8, y=1.1)
-        )
-        st.plotly_chart(fig_pareto, use_container_width=True)
+        # --- TABA 4: HISTOGRAMA ---
+        with t4:
+            st.subheader("Distribución de Frecuencia de Tiempos")
+            fig_h = px.histogram(df_f, x=COL_TIEMPO, nbins=20, text_auto=True, color_discrete_sequence=['#00CC96'])
+            fig_h.update_layout(bargap=0.1, xaxis_title="Rangos de Tiempo (Eje X)", yaxis_title="Cantidad de OTs")
+            # Forzamos que se vean más etiquetas en el eje X
+            fig_h.update_xaxes(nticks=20)
+            st.plotly_chart(fig_h, use_container_width=True)
+            st.write("**Hoja de Verificación: Frecuencias de Tiempo**")
+            # Creamos los rangos para la tabla
+            df_f['Rango'] = pd.cut(df_f[COL_TIEMPO], bins=10)
+            res_h = df_f['Rango'].value_counts().reset_index().sort_values('Rango')
+            st.dataframe(res_h, hide_index=True, use_container_width=True)
 
-        # --- OTROS REPORTES ---
-        def generar_seccion(titulo, g_col, a_col, func):
-            st.subheader(titulo)
-            resumen = df_filtrado.groupby(g_col)[a_col].agg(func).reset_index().sort_values(by=a_col, ascending=False)
-            st.plotly_chart(px.bar(resumen.head(10), x=g_col, y=a_col, text_auto='.2f'), use_container_width=True)
+        # --- TABA 5: PARETO (CALIDAD) ---
+        with t5:
+            st.subheader("Diagrama de Pareto: Horas Hombre por Técnico")
+            st.info("Herramienta de Calidad: Identifica el 20% de técnicos que concentran el 80% de la carga de HH.")
+            p_data = df_f.groupby(COL_TECNICO)[COL_HH].sum().sort_values(ascending=False).reset_index()
+            p_data['CumSum'] = p_data[COL_HH].cumsum()
+            p_data['% Acumulado'] = 100 * p_data['CumSum'] / p_data[COL_HH].sum()
 
-        generar_seccion("Top 10: Promedio Tiempo Mantención por Técnico", COL_TECNICO, COL_TIEMPO, "mean")
+            fig_pareto = go.Figure()
+            fig_pareto.add_trace(go.Bar(x=p_data[COL_TECNICO], y=p_data[COL_HH], name="HH", marker_color='blue'))
+            fig_pareto.add_trace(go.Scatter(x=p_data[COL_TECNICO], y=p_data['% Acumulado'], name="% Acumulado", yaxis="y2", line=dict(color="red", width=3)))
+            fig_pareto.update_layout(yaxis=dict(title="HH Totales"), yaxis2=dict(title="%", overlaying="y", side="right", range=[0, 105]))
+            st.plotly_chart(fig_pareto, use_container_width=True)
+            st.write("**Hoja de Verificación: Pareto**")
+            st.dataframe(p_data, hide_index=True, use_container_width=True)
+
+        # --- TABA 6: EQUIPOS ---
+        with t6:
+            st.subheader("Distribución por Equipo")
+            res_eq = df_f.groupby(COL_EQUIPO)[COL_OT].count().reset_index().sort_values(COL_OT, ascending=False)
+            st.plotly_chart(px.bar(res_eq, x=COL_EQUIPO, y=COL_OT, text_auto=True), use_container_width=True)
+            st.write("**Hoja de Verificación: Equipos**")
+            st.dataframe(res_eq, hide_index=True, use_container_width=True)
+
+        # --- TABA 7: DATOS CRUDOS ---
+        with t7:
+            st.subheader("Registros Filtrados")
+            st.dataframe(df_f, use_container_width=True)
 
     else:
-        st.error("No se encontraron todas las columnas necesarias.")
+        st.error(f"Faltan columnas. Asegúrate de que existan: {requeridos}")
 else:
-    st.info("Sube tu archivo Excel para comenzar el análisis de calidad.")
+    st.info("Sube tu archivo Excel para activar el Dashboard.")
